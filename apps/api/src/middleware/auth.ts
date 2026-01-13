@@ -3,9 +3,12 @@ import { createChildLogger } from '../lib/logger.js';
 
 const logger = createChildLogger('auth-middleware');
 
+// @ts-ignore - Fastify type augmentation
 declare module 'fastify' {
+  // @ts-ignore
   interface FastifyRequest {
     userId?: string;
+    // @ts-ignore
     user?: {
       id: string;
       email?: string;

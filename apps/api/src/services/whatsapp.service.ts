@@ -343,7 +343,7 @@ export async function logMessageEvent(
       userId,
       direction,
       channel: 'WHATSAPP',
-      payload: sanitizeForLogging(payload),
+      payload: sanitizeForLogging(payload) as object,
     },
   });
 }

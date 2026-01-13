@@ -13,6 +13,7 @@ import { whatsappRoutes } from './routes/whatsapp.js';
 import { activityRoutes } from './routes/activity.js';
 import { startReminderWorker } from './workers/reminder.worker.js';
 import { startSweeper } from './workers/sweeper.js';
+import { isQueueAvailable } from './lib/queue.js';
 
 async function main() {
   const fastify = Fastify({
@@ -63,16 +64,24 @@ async function main() {
   await fastify.register(whatsappRoutes);
   await fastify.register(activityRoutes);
 
-  // Start workers
-  const reminderWorker = startReminderWorker();
-  const sweeper = startSweeper();
+  // Start workers only if Redis is available
+  let reminderWorker: ReturnType<typeof startReminderWorker> = null;
+  let sweeper: ReturnType<typeof startSweeper> | null = null;
+
+  if (isQueueAvailable()) {
+    reminderWorker = startReminderWorker();
+    sweeper = startSweeper();
+    logger.info('Background workers started');
+  } else {
+    logger.warn('Redis not available - background workers disabled');
+  }
 
   // Graceful shutdown
   const shutdown = async () => {
     logger.info('Shutting down...');
 
-    sweeper.stop();
-    await reminderWorker.close();
+    if (sweeper) sweeper.stop();
+    if (reminderWorker) await reminderWorker.close();
     await fastify.close();
 
     process.exit(0);
@@ -89,7 +98,6 @@ async function main() {
     });
 
     logger.info(`Server running at http://${config.host}:${config.port}`);
-    logger.info('Reminder worker and sweeper started');
   } catch (error) {
     logger.error(error);
     process.exit(1);

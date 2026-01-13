@@ -10,13 +10,13 @@ const configSchema = z.object({
   // Database
   databaseUrl: z.string(),
 
-  // Redis
-  redisUrl: z.string().default('redis://localhost:6379'),
+  // Redis (optional)
+  redisUrl: z.string().optional(),
 
-  // WhatsApp
-  whatsappPhoneNumberId: z.string(),
-  whatsappAccessToken: z.string(),
-  whatsappVerifyToken: z.string(),
+  // WhatsApp (optional for initial deployment)
+  whatsappPhoneNumberId: z.string().optional(),
+  whatsappAccessToken: z.string().optional(),
+  whatsappVerifyToken: z.string().optional(),
   whatsappAppSecret: z.string().optional(),
   whatsappBusinessAccountId: z.string().optional(),
 

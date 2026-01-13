@@ -148,10 +148,8 @@ export async function taskRoutes(fastify: FastifyInstance): Promise<void> {
         title: result.data.title,
         notes: result.data.notes,
         status: result.data.status,
-        dueAt: result.data.dueAt ? new Date(result.data.dueAt) : result.data.dueAt,
-        reminderAt: result.data.reminderAt
-          ? new Date(result.data.reminderAt)
-          : result.data.reminderAt,
+        dueAt: result.data.dueAt ? new Date(result.data.dueAt) : undefined,
+        reminderAt: result.data.reminderAt ? new Date(result.data.reminderAt) : undefined,
         recurrence: result.data.recurrence,
       });
 

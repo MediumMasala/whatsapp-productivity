@@ -9,7 +9,12 @@ import type { ReminderJobData } from '../lib/queue.js';
 
 const logger = createChildLogger('reminder-worker');
 
-export function startReminderWorker(): Worker {
+export function startReminderWorker(): Worker | null {
+  if (!redis) {
+    logger.warn('Redis not available, reminder worker not started');
+    return null;
+  }
+
   const worker = new Worker<ReminderJobData>(
     'reminders',
     async (job: Job<ReminderJobData>) => {

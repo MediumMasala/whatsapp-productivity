@@ -7,19 +7,21 @@ const logger = createChildLogger('queue');
 // Queue names
 export const REMINDER_QUEUE = 'reminders';
 
-// Create the reminder queue
-export const reminderQueue = new Queue(REMINDER_QUEUE, {
-  connection: redis,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 1000,
-    },
-    removeOnComplete: 100,
-    removeOnFail: 500,
-  },
-});
+// Create the reminder queue (only if Redis is available)
+export const reminderQueue = redis
+  ? new Queue(REMINDER_QUEUE, {
+      connection: redis,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 1000,
+        },
+        removeOnComplete: 100,
+        removeOnFail: 500,
+      },
+    })
+  : null;
 
 // Job data types
 export interface ReminderJobData {
@@ -35,6 +37,11 @@ export async function scheduleReminderJob(
   userId: string,
   scheduledAt: Date
 ): Promise<string> {
+  if (!reminderQueue) {
+    logger.warn({ reminderId }, 'Redis not available, reminder job not scheduled');
+    return reminderId;
+  }
+
   const delay = Math.max(0, scheduledAt.getTime() - Date.now());
 
   const job = await reminderQueue.add(
@@ -52,6 +59,10 @@ export async function scheduleReminderJob(
 
 // Cancel a reminder job
 export async function cancelReminderJob(reminderId: string): Promise<boolean> {
+  if (!reminderQueue) {
+    return false;
+  }
+
   const jobId = `reminder-${reminderId}`;
   const job = await reminderQueue.getJob(jobId);
 
@@ -66,6 +77,16 @@ export async function cancelReminderJob(reminderId: string): Promise<boolean> {
 
 // Get queue stats
 export async function getQueueStats() {
+  if (!reminderQueue) {
+    return {
+      waiting: 0,
+      active: 0,
+      completed: 0,
+      failed: 0,
+      delayed: 0,
+    };
+  }
+
   const [waiting, active, completed, failed, delayed] = await Promise.all([
     reminderQueue.getWaitingCount(),
     reminderQueue.getActiveCount(),
@@ -81,6 +102,11 @@ export async function getQueueStats() {
     failed,
     delayed,
   };
+}
+
+// Check if Redis/Queue is available
+export function isQueueAvailable(): boolean {
+  return redis !== null && reminderQueue !== null;
 }
 
 export { Worker, Job };
