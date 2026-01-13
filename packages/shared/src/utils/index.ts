@@ -267,7 +267,7 @@ export function sanitizeForLogging(obj: Record<string, unknown>): Record<string,
  * Create a delay promise
  */
 export function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 }
 
 /**
