@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TaskStatus {
+  IDEA
+  TODO
+  DONE
+}
+
+enum TaskSource {
+  WHATSAPP
+  WEB
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageChannel {
+  WHATSAPP
+}
+
+enum ReminderDeliveryMode {
+  SESSION_FREEFORM
+  TEMPLATE
+}
+
+enum ReminderState {
+  SCHEDULED
+  SENT
+  ACKED_DONE
+  ACKED_SNOOZE
+  FAILED
+  CANCELED
+}
+
+model User {
+  id                   String    @id @default(cuid())
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  email                String?   @unique
+  whatsappNumber       String    @unique
+  timezone             String    @default("Asia/Kolkata")
+  quietHoursStart      String?   // Format: "HH:mm"
+  quietHoursEnd        String?   // Format: "HH:mm"
+  snoozeMinutesDefault Int       @default(15)
+  reminderLeadTime     Int       @default(0)
+  lastInboundAt        DateTime?
+
+  // Auth related
+  otpCode              String?
+  otpExpiresAt         DateTime?
+
+  // Relations
+  tasks                Task[]
+  reminders            Reminder[]
+  messageEvents        MessageEvent[]
+
+  @@index([whatsappNumber])
+  @@index([email])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  userId      String
+  title       String
+  notes       String?
+  status      TaskStatus @default(TODO)
+  dueAt       DateTime?
+  reminderAt  DateTime?
+  recurrence  String?    // RRULE format
+  source      TaskSource @default(WEB)
+  externalRef String?
+
+  // Relations
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminders   Reminder[]
+
+  @@index([userId])
+  @@index([userId, status])
+  @@index([reminderAt])
+}
+
+model Reminder {
+  id           String               @id @default(cuid())
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  taskId       String
+  userId       String
+  scheduledAt  DateTime
+  sentAt       DateTime?
+  deliveryMode ReminderDeliveryMode @default(SESSION_FREEFORM)
+  messageId    String?
+  state        ReminderState        @default(SCHEDULED)
+  retriesCount Int                  @default(0)
+  lastError    String?
+
+  // Relations
+  task         Task                 @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([taskId])
+  @@index([scheduledAt, state])
+  @@index([state])
+}
+
+model MessageEvent {
+  id        String           @id @default(cuid())
+  createdAt DateTime         @default(now())
+  userId    String
+  direction MessageDirection
+  channel   MessageChannel   @default(WHATSAPP)
+  payload   Json
+
+  // Relations
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
