@@ -10,9 +10,9 @@ interface AddTaskModalProps {
   onAdd: (task: {
     title: string;
     notes?: string;
-    status: 'IDEA' | 'TODO';
+    status?: 'IDEA' | 'TODO';
     reminderAt?: string;
-  }) => Promise<void>;
+  }) => Promise<unknown>;
   defaultStatus?: 'IDEA' | 'TODO';
 }
 
