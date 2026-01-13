@@ -4,14 +4,14 @@ import type { Task } from './api';
 
 interface User {
   id: string;
-  email: string | null;
+  email?: string | null;
   whatsappNumber: string;
   timezone: string;
-  quietHoursStart: string | null;
-  quietHoursEnd: string | null;
-  snoozeMinutesDefault: number;
-  reminderLeadTime: number;
-  needsWhatsAppLink: boolean;
+  quietHoursStart?: string | null;
+  quietHoursEnd?: string | null;
+  snoozeMinutesDefault?: number;
+  reminderLeadTime?: number;
+  needsWhatsAppLink?: boolean;
 }
 
 interface AuthState {
