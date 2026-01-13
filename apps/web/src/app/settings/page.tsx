@@ -41,8 +41,8 @@ export default function SettingsPage() {
       setTimezone(user.timezone);
       setQuietHoursStart(user.quietHoursStart || '');
       setQuietHoursEnd(user.quietHoursEnd || '');
-      setSnoozeMinutesDefault(user.snoozeMinutesDefault);
-      setReminderLeadTime(user.reminderLeadTime);
+      setSnoozeMinutesDefault(user.snoozeMinutesDefault ?? 15);
+      setReminderLeadTime(user.reminderLeadTime ?? 0);
     }
   }, [token, user, router]);
 
