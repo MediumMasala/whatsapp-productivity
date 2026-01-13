@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=dist/bundle.js --format=esm --packages=external --external:@prisma/client --external:prisma",
     "start": "node dist/index.js",
+    "start:bundle": "node dist/bundle.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "test": "vitest",
@@ -23,6 +25,7 @@
     "@fastify/jwt": "^8.0.0",
     "@fastify/rate-limit": "^9.1.0",
     "@prisma/client": "^5.9.1",
+    "@whatsapp-productivity/mastra": "workspace:*",
     "@whatsapp-productivity/shared": "workspace:*",
     "bullmq": "^5.1.6",
     "fastify": "^4.26.0",
@@ -36,6 +39,7 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/node-cron": "^3.0.11",
+    "esbuild": "^0.20.0",
     "prisma": "^5.9.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
