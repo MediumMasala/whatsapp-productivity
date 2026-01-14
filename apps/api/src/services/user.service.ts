@@ -82,6 +82,20 @@ export async function updateLastInbound(id: string): Promise<void> {
   });
 }
 
+export async function updateUserName(id: string, name: string): Promise<User> {
+  return prisma.user.update({
+    where: { id },
+    data: { name },
+  });
+}
+
+export async function markUserOnboarded(id: string): Promise<User> {
+  return prisma.user.update({
+    where: { id },
+    data: { isOnboarded: true },
+  });
+}
+
 export async function generateAndStoreOtp(email: string): Promise<{ otp: string; user: User }> {
   const otp = generateOtp(6);
   const expiresAt = new Date(Date.now() + OTP_EXPIRY_SECONDS * 1000);

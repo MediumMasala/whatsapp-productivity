@@ -55,6 +55,29 @@ async function callWhatsAppAPI(
   }
 }
 
+// Send a reaction emoji to a message
+export async function sendReaction(
+  to: string,
+  messageId: string,
+  emoji: string
+): Promise<SendMessageResult> {
+  const result = await callWhatsAppAPI('messages', {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'reaction',
+    reaction: {
+      message_id: messageId,
+      emoji,
+    },
+  });
+
+  if (result.ok) {
+    return { success: true };
+  }
+  return { success: false, error: result.error };
+}
+
 export async function sendTextMessage(
   to: string,
   text: string

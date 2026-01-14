@@ -6,12 +6,16 @@ import {
 } from './parser.js';
 import type { AIParsedResult, Task, User } from '@whatsapp-productivity/shared';
 import { DEFAULT_SNOOZE_MINUTES, AI_CONFIDENCE_THRESHOLD } from '@whatsapp-productivity/shared';
+import { format } from 'date-fns';
+import { toZonedTime } from 'date-fns-tz';
 
 export interface MessageHandlerDeps {
   // User operations
   findUserByWhatsApp: (phone: string) => Promise<User | null>;
   getOrCreateUserByWhatsApp: (phone: string) => Promise<User>;
   updateLastInbound: (userId: string) => Promise<void>;
+  updateUserName: (userId: string, name: string) => Promise<User>;
+  markUserOnboarded: (userId: string) => Promise<User>;
 
   // Task operations
   createTask: (input: {
@@ -37,6 +41,7 @@ export interface MessageHandlerDeps {
 
   // WhatsApp operations
   sendTextMessage: (to: string, text: string) => Promise<{ success: boolean }>;
+  sendReaction: (to: string, messageId: string, emoji: string) => Promise<{ success: boolean }>;
   sendTaskCreatedConfirmation: (
     user: User,
     task: Task
@@ -62,10 +67,33 @@ export interface HandleMessageResult {
   error?: string;
 }
 
+// Format time in 12-hour AM/PM format for IST
+function formatTimeIST(date: Date, timezone: string = 'Asia/Kolkata'): string {
+  const zonedDate = toZonedTime(date, timezone);
+  return format(zonedDate, 'h:mm a');
+}
+
+// Format date in friendly format
+function formatDateIST(date: Date, timezone: string = 'Asia/Kolkata'): string {
+  const zonedDate = toZonedTime(date, timezone);
+  const today = toZonedTime(new Date(), timezone);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  if (zonedDate.toDateString() === today.toDateString()) {
+    return `today at ${format(zonedDate, 'h:mm a')}`;
+  } else if (zonedDate.toDateString() === tomorrow.toDateString()) {
+    return `tomorrow at ${format(zonedDate, 'h:mm a')}`;
+  } else {
+    return format(zonedDate, "EEEE, MMM d 'at' h:mm a");
+  }
+}
+
 export async function handleInboundMessage(
   from: string,
   text: string,
-  deps: MessageHandlerDeps
+  deps: MessageHandlerDeps,
+  messageId?: string
 ): Promise<HandleMessageResult> {
   try {
     // Get or create user
@@ -78,8 +106,14 @@ export async function handleInboundMessage(
     await deps.logMessageEvent(user.id, 'INBOUND', {
       from,
       text,
+      messageId,
       timestamp: new Date().toISOString(),
     });
+
+    // Check if user needs onboarding
+    if (!user.isOnboarded) {
+      return await handleOnboarding(user, text, deps, messageId);
+    }
 
     // Parse the message
     const context: ParseContext = {
@@ -90,7 +124,7 @@ export async function handleInboundMessage(
     const parsed = await parseMessage(text, context);
 
     // Handle based on intent
-    return await processIntent(user, text, parsed, deps);
+    return await processIntent(user, text, parsed, deps, messageId);
   } catch (error) {
     console.error('Error handling message:', error);
     return {
@@ -101,21 +135,69 @@ export async function handleInboundMessage(
   }
 }
 
+async function handleOnboarding(
+  user: User,
+  text: string,
+  deps: MessageHandlerDeps,
+  messageId?: string
+): Promise<HandleMessageResult> {
+  const trimmedText = text.trim();
+
+  // If user doesn't have a name yet, this message is their name
+  if (!user.name) {
+    // Check if this looks like a name (not a command)
+    const lowerText = trimmedText.toLowerCase();
+    const isCommand = ['hi', 'hello', 'hey', 'start', 'help', '/start'].includes(lowerText);
+
+    if (isCommand || trimmedText.length < 2) {
+      // Send welcome message asking for name
+      await deps.sendTextMessage(
+        user.whatsappNumber,
+        `👋 Hey there! I'm your personal reminder assistant.\n\nI'll help you remember everything that matters. Just tell me what to remind you about, and I'll make sure you never forget!\n\nFirst, what should I call you?`
+      );
+      return { success: true, action: 'onboarding_welcome' };
+    }
+
+    // Save the name
+    const name = trimmedText.split(' ')[0]; // Take first word as name
+    await deps.updateUserName(user.id, name);
+    await deps.markUserOnboarded(user.id);
+
+    // React with thumbs up
+    if (messageId) {
+      await deps.sendReaction(user.whatsappNumber, messageId, '👍');
+    }
+
+    // Send personalized welcome
+    await deps.sendTextMessage(
+      user.whatsappNumber,
+      `Nice to meet you, ${name}! 🎉\n\nI'm ready to be your reminder buddy. Here's how we'll work together:\n\n📝 Just text me things like:\n• "Remind me to call mom at 3 PM"\n• "Meeting with team tomorrow 10 AM"\n• "Buy groceries at 6:30 PM"\n\nI'll note it down and ping you right on time! ⏰\n\nGo ahead, try sending me your first reminder!`
+    );
+
+    return { success: true, action: 'onboarding_complete' };
+  }
+
+  // User has name but isn't marked onboarded (edge case)
+  await deps.markUserOnboarded(user.id);
+  return await handleInboundMessage(user.whatsappNumber, text, deps, messageId);
+}
+
 async function processIntent(
   user: User,
   originalText: string,
   parsed: AIParsedResult,
-  deps: MessageHandlerDeps
+  deps: MessageHandlerDeps,
+  messageId?: string
 ): Promise<HandleMessageResult> {
   switch (parsed.intent) {
     case 'create_task':
-      return handleCreateTask(user, parsed, deps);
+      return handleCreateTask(user, parsed, deps, messageId);
 
     case 'list_tasks':
       return handleListTasks(user, parsed, deps);
 
     case 'mark_done':
-      return handleMarkDone(user, parsed, deps);
+      return handleMarkDone(user, parsed, deps, messageId);
 
     case 'snooze':
       return handleSnooze(user, parsed, deps);
@@ -128,10 +210,9 @@ async function processIntent(
       return { success: true, action: 'help_sent' };
 
     case 'set_pref':
-      // Send link to web dashboard
       await deps.sendTextMessage(
         user.whatsappNumber,
-        "Visit your dashboard to update settings: your-app-url.com/settings"
+        `⚙️ Visit your dashboard to update settings:\nhttps://wa-productivity-app.vercel.app/settings`
       );
       return { success: true, action: 'settings_link_sent' };
 
@@ -146,9 +227,14 @@ async function processIntent(
           source: 'WHATSAPP',
         });
 
+        // React with lightbulb for idea
+        if (messageId) {
+          await deps.sendReaction(user.whatsappNumber, messageId, '💡');
+        }
+
         await deps.sendTextMessage(
           user.whatsappNumber,
-          `💡 saved to ideas: ${task.title}\n\nTip: say "remind me [time] to [task]" for reminders`
+          `💡 Noted as an idea: "${task.title}"\n\nTip: Say "remind me [time] to [task]" for timed reminders!`
         );
 
         return { success: true, action: 'saved_as_idea', task };
@@ -162,12 +248,13 @@ async function processIntent(
 async function handleCreateTask(
   user: User,
   parsed: AIParsedResult,
-  deps: MessageHandlerDeps
+  deps: MessageHandlerDeps,
+  messageId?: string
 ): Promise<HandleMessageResult> {
   if (!parsed.task?.title) {
     await deps.sendTextMessage(
       user.whatsappNumber,
-      "I couldn't understand the task. Please try again."
+      "Hmm, I couldn't catch that. Could you try again? For example:\n\"Remind me to call the dentist at 4 PM\""
     );
     return { success: false, action: 'invalid_task', error: 'No title' };
   }
@@ -181,7 +268,26 @@ async function handleCreateTask(
     source: 'WHATSAPP',
   });
 
-  await deps.sendTaskCreatedConfirmation(user, task);
+  // React with memo/note emoji when task is noted
+  if (messageId) {
+    await deps.sendReaction(user.whatsappNumber, messageId, '📝');
+  }
+
+  // Send confirmation with friendly time format
+  const greeting = user.name ? `Got it, ${user.name}!` : 'Got it!';
+
+  if (task.reminderAt) {
+    const timeStr = formatDateIST(task.reminderAt, user.timezone);
+    await deps.sendTextMessage(
+      user.whatsappNumber,
+      `${greeting} ✅\n\n📌 "${task.title}"\n⏰ I'll remind you ${timeStr}\n\nRelax, I've got your back! 😊`
+    );
+  } else {
+    await deps.sendTextMessage(
+      user.whatsappNumber,
+      `${greeting} ✅\n\n📌 Added to your to-do: "${task.title}"\n\nWant me to remind you at a specific time? Just tell me when!`
+    );
+  }
 
   return { success: true, action: 'task_created', task };
 }
@@ -197,7 +303,14 @@ async function handleListTasks(
     status: listType === 'IDEA' ? 'IDEA' : 'TODO',
   });
 
-  await deps.sendTaskList(user, tasks, listType);
+  if (tasks.length === 0) {
+    const message = listType === 'IDEA'
+      ? `No ideas saved yet, ${user.name || 'friend'}! 💭\n\nJust text me any thought and I'll save it.`
+      : `Your task list is clear, ${user.name || 'friend'}! 🎉\n\nSend me something to remind you about.`;
+    await deps.sendTextMessage(user.whatsappNumber, message);
+  } else {
+    await deps.sendTaskList(user, tasks, listType);
+  }
 
   return { success: true, action: 'list_sent' };
 }
@@ -205,7 +318,8 @@ async function handleListTasks(
 async function handleMarkDone(
   user: User,
   parsed: AIParsedResult,
-  deps: MessageHandlerDeps
+  deps: MessageHandlerDeps,
+  messageId?: string
 ): Promise<HandleMessageResult> {
   let taskId = parsed.taskId;
 
@@ -225,13 +339,13 @@ async function handleMarkDone(
     } else if (tasks.length > 1) {
       await deps.sendTextMessage(
         user.whatsappNumber,
-        "Which task did you complete? You have multiple active tasks."
+        `Which task did you complete? You have ${tasks.length} active tasks. 📋`
       );
       return { success: false, action: 'ambiguous_task' };
     } else {
       await deps.sendTextMessage(
         user.whatsappNumber,
-        "No active tasks found to mark done."
+        `No active tasks to mark done! 🎉\n\nLooks like you're all caught up.`
       );
       return { success: false, action: 'no_tasks' };
     }
@@ -239,9 +353,17 @@ async function handleMarkDone(
 
   const task = await deps.markTaskDone(taskId);
 
+  // React with checkmark
+  if (messageId) {
+    await deps.sendReaction(user.whatsappNumber, messageId, '✅');
+  }
+
+  const celebrationEmojis = ['🎉', '💪', '🙌', '⭐', '🏆'];
+  const randomEmoji = celebrationEmojis[Math.floor(Math.random() * celebrationEmojis.length)];
+
   await deps.sendTextMessage(
     user.whatsappNumber,
-    `✅ done: ${task.title}`
+    `${randomEmoji} Done: "${task.title}"\n\nGreat job${user.name ? `, ${user.name}` : ''}! Keep crushing it!`
   );
 
   return { success: true, action: 'task_done', task };
@@ -265,7 +387,7 @@ async function handleSnooze(
   if (!taskId) {
     await deps.sendTextMessage(
       user.whatsappNumber,
-      "No recent reminder to snooze."
+      "No recent reminder to snooze. 🤔"
     );
     return { success: false, action: 'no_reminder_to_snooze' };
   }
@@ -286,10 +408,12 @@ async function handleSnooze(
 
   const { task } = await deps.snoozeTask(taskId, minutes);
 
-  const timeStr = minutes >= 60 ? `${Math.round(minutes / 60)}h` : `${minutes}m`;
+  const newReminderTime = new Date(Date.now() + minutes * 60000);
+  const timeStr = formatDateIST(newReminderTime, user.timezone);
+
   await deps.sendTextMessage(
     user.whatsappNumber,
-    `⏰ snoozed: ${task.title} — ${timeStr}`
+    `⏰ Snoozed: "${task.title}"\n\nI'll remind you again ${timeStr}`
   );
 
   return { success: true, action: 'task_snoozed', task };
@@ -300,11 +424,9 @@ async function handleMoveTask(
   parsed: AIParsedResult,
   deps: MessageHandlerDeps
 ): Promise<HandleMessageResult> {
-  // This would need task search/identification logic
-  // For MVP, send a message pointing to web dashboard
   await deps.sendTextMessage(
     user.whatsappNumber,
-    "Use the web dashboard to move tasks between columns."
+    `📱 Use the web dashboard to move tasks:\nhttps://wa-productivity-app.vercel.app/board`
   );
 
   return { success: true, action: 'move_instruction_sent' };
@@ -330,7 +452,7 @@ export async function handleInteractiveReply(
 
       if (subAction === 'done') {
         const task = await deps.markTaskDone(actualTaskId);
-        await deps.sendTextMessage(user.whatsappNumber, `✅ done: ${task.title}`);
+        await deps.sendTextMessage(user.whatsappNumber, `✅ Done: "${task.title}"\n\nAwesome work! 🎉`);
         return { success: true, action: 'task_done', task };
       }
 
@@ -342,7 +464,7 @@ export async function handleInteractiveReply(
       if (subAction === 'edit') {
         await deps.sendTextMessage(
           user.whatsappNumber,
-          "To edit, visit the web dashboard or send a new task description."
+          "✏️ To edit, visit the dashboard or just send me the updated task!"
         );
         return { success: true, action: 'edit_instruction_sent' };
       }
@@ -363,8 +485,13 @@ export async function handleInteractiveReply(
       }
 
       const { task } = await deps.snoozeTask(actualTaskId, minutes);
-      const timeStr = minutes >= 60 ? `${Math.round(minutes / 60)}h` : `${minutes}m`;
-      await deps.sendTextMessage(user.whatsappNumber, `⏰ snoozed: ${task.title} — ${timeStr}`);
+      const newReminderTime = new Date(Date.now() + minutes * 60000);
+      const timeStr = formatDateIST(newReminderTime, user.timezone);
+
+      await deps.sendTextMessage(
+        user.whatsappNumber,
+        `⏰ Snoozed: "${task.title}"\n\nI'll remind you again ${timeStr}`
+      );
       return { success: true, action: 'task_snoozed', task };
     }
   }

@@ -45,6 +45,7 @@ model User {
   id                   String    @id @default(cuid())
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
+  name                 String?   // User's name for personalized messages
   email                String?   @unique
   whatsappNumber       String    @unique
   timezone             String    @default("Asia/Kolkata")
@@ -53,6 +54,7 @@ model User {
   snoozeMinutesDefault Int       @default(15)
   reminderLeadTime     Int       @default(0)
   lastInboundAt        DateTime?
+  isOnboarded          Boolean   @default(false)
 
   // Auth related
   otpCode              String?

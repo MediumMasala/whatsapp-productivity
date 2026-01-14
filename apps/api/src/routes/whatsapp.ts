@@ -14,17 +14,27 @@ const logger = createChildLogger('whatsapp-routes');
 
 // Create handler dependencies
 const handlerDeps = {
+  // User operations
   findUserByWhatsApp: userService.findUserByWhatsApp,
   getOrCreateUserByWhatsApp: userService.getOrCreateUserByWhatsApp,
   updateLastInbound: userService.updateLastInbound,
+  updateUserName: userService.updateUserName,
+  markUserOnboarded: userService.markUserOnboarded,
+
+  // Task operations
   createTask: taskService.createTask,
   getTasksByUser: taskService.getTasksByUser,
   getTaskById: taskService.getTaskById,
   markTaskDone: taskService.markTaskDone,
   moveTask: taskService.moveTask,
   snoozeTask: taskService.snoozeTask,
+
+  // Reminder operations
   getRecentSentReminder: reminderService.getRecentSentReminder,
+
+  // WhatsApp operations
   sendTextMessage: whatsappService.sendTextMessage,
+  sendReaction: whatsappService.sendReaction,
   sendTaskCreatedConfirmation: whatsappService.sendTaskCreatedConfirmation,
   sendTaskList: whatsappService.sendTaskList,
   sendHelpMessage: whatsappService.sendHelpMessage,
@@ -98,7 +108,7 @@ export async function whatsappRoutes(fastify: FastifyInstance): Promise<void> {
   // Development endpoint to simulate inbound messages
   if (process.env.NODE_ENV === 'development') {
     fastify.post('/dev/simulate-message', async (request, reply) => {
-      const { from, text } = request.body as { from: string; text: string };
+      const { from, text, messageId } = request.body as { from: string; text: string; messageId?: string };
 
       if (!from || !text) {
         return reply.code(400).send({
@@ -109,7 +119,7 @@ export async function whatsappRoutes(fastify: FastifyInstance): Promise<void> {
 
       logger.info({ from, text }, 'Simulating inbound message');
 
-      const result = await handleInboundMessage(from, text, handlerDeps);
+      const result = await handleInboundMessage(from, text, handlerDeps, messageId);
 
       return reply.send({
         success: true,
@@ -155,11 +165,12 @@ async function processWebhook(payload: WhatsAppWebhookPayload): Promise<void> {
 
       for (const message of messages) {
         const from = message.from;
+        const messageId = message.id; // Capture message ID for reactions
 
         try {
           if (message.type === 'text' && message.text?.body) {
-            // Handle text message
-            await handleInboundMessage(from, message.text.body, handlerDeps);
+            // Handle text message - pass messageId for reactions
+            await handleInboundMessage(from, message.text.body, handlerDeps, messageId);
           } else if (message.type === 'interactive') {
             // Handle interactive reply (button or list)
             const replyId =
@@ -174,7 +185,7 @@ async function processWebhook(payload: WhatsAppWebhookPayload): Promise<void> {
             await handleInteractiveReply(from, message.button.payload, handlerDeps);
           }
         } catch (error) {
-          logger.error({ error, from, messageId: message.id }, 'Error processing message');
+          logger.error({ error, from, messageId }, 'Error processing message');
         }
       }
 

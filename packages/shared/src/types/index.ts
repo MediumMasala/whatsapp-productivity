@@ -26,6 +26,7 @@ export type ReminderState =
 export interface User {
   id: string;
   createdAt: Date;
+  name: string | null;
   email: string | null;
   whatsappNumber: string;
   timezone: string;
@@ -34,6 +35,7 @@ export interface User {
   snoozeMinutesDefault: number;
   reminderLeadTime: number;
   lastInboundAt: Date | null;
+  isOnboarded: boolean;
 }
 
 // Task interface
