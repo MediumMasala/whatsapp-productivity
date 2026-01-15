@@ -1,5 +1,5 @@
 {
-  "installCommand": "pnpm install",
+  "installCommand": "npm i -g pnpm && pnpm install",
   "buildCommand": "pnpm --filter @whatsapp-productivity/shared build && pnpm --filter web build",
   "outputDirectory": "apps/web/.next",
   "framework": "nextjs"
