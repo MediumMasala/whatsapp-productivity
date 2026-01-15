@@ -26,6 +26,7 @@ export function parseDateTime(
 ): Date | null {
   const ref = referenceDate || new Date();
   const zonedRef = toZonedTime(ref, timezone);
+  const currentHour = zonedRef.getHours();
 
   // Use chrono to parse
   const results = chrono.parse(text, zonedRef, { forwardDate: true });
@@ -40,6 +41,29 @@ export function parseDateTime(
   // If no time was specified, use default reminder time
   if (!parsed.start.isCertain('hour')) {
     date = setHours(setMinutes(date, DEFAULT_REMINDER_MINUTE), DEFAULT_REMINDER_HOUR);
+  } else if (!parsed.start.isCertain('meridiem')) {
+    // Time was specified but AM/PM wasn't clear (e.g., "9:30" without AM/PM)
+    const parsedHour = parsed.start.get('hour') || 0;
+
+    // Smart AM/PM inference based on current time and context
+    // If it's currently evening (after 5 PM) and parsed hour is less than 12
+    // and the time would be in the past if interpreted as AM today,
+    // assume they mean PM
+    if (currentHour >= 17 && parsedHour < 12) {
+      // User likely means PM since it's evening
+      const pmHour = parsedHour === 12 ? 12 : parsedHour + 12;
+      date = setHours(date, pmHour);
+    } else if (currentHour >= 12 && parsedHour <= currentHour - 12 && parsedHour < 12) {
+      // It's afternoon and the hour would be in the past as AM, assume PM
+      const pmHour = parsedHour + 12;
+      date = setHours(date, pmHour);
+    }
+  }
+
+  // If the resulting time is in the past, move to next day
+  const zonedDate = toZonedTime(date, timezone);
+  if (isAfter(zonedRef, zonedDate)) {
+    date = addDays(date, 1);
   }
 
   // Convert back to UTC
@@ -169,21 +193,26 @@ export function extractTaskTitle(text: string): string {
     .replace(/^(remind me( to)?|todo:|idea:|task:)\s*/i, '')
     .trim();
 
-  // Remove time expressions at the end
+  // Remove time expressions (at end, middle, or anywhere)
   const timePatterns = [
-    /\s+(at|@)\s+\d{1,2}(:\d{2})?\s*(am|pm)?$/i,
-    /\s+tomorrow\s*(morning|afternoon|evening)?$/i,
-    /\s+today\s*(morning|afternoon|evening)?$/i,
-    /\s+on\s+\w+day$/i,
-    /\s+in\s+\d+\s*(minutes?|hours?|days?)$/i,
-    /\s+next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i,
+    /\s+(at|@|by)\s+\d{1,2}(:\d{2})?\s*(am|pm)?/gi,
+    /\s+tomorrow\s*(morning|afternoon|evening|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?)?/gi,
+    /\s+today\s*(morning|afternoon|evening|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?)?/gi,
+    /\s+on\s+\w+day/gi,
+    /\s+in\s+\d+\s*(minutes?|hours?|days?)/gi,
+    /\s+next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/gi,
+    /\s+this\s+(morning|afternoon|evening|night)/gi,
+    /\s+tonight/gi,
   ];
 
   for (const pattern of timePatterns) {
     title = title.replace(pattern, '');
   }
 
-  return title.trim();
+  // Clean up any double spaces
+  title = title.replace(/\s+/g, ' ').trim();
+
+  return title;
 }
 
 /**
