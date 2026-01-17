@@ -6,7 +6,6 @@ import {
   applyDefaultTimeRules,
   extractTaskTitle,
   detectIntentRuleBased,
-  getSmartDefaultReminderTime,
   DEFAULT_TIMEZONE,
   DEFAULT_REMINDER_HOUR,
   DEFAULT_REMINDER_MINUTE,
@@ -168,18 +167,12 @@ function parseWithRules(
     // Extract title
     const title = extractTaskTitle(text);
 
-    // Parse datetime
+    // Parse datetime - respects exact times specified by user
     let reminderAt = parseDateTime(text, timezone, currentTime);
     reminderAt = applyDefaultTimeRules(reminderAt, text, timezone);
 
     // Determine status
     const status = detectedStatus || 'TODO';
-
-    // For "remind me" messages without a specific time, use smart defaults
-    const isReminderRequest = lower.includes('remind me') || lower.includes('reminder');
-    if (!reminderAt && isReminderRequest && status === 'TODO') {
-      reminderAt = getSmartDefaultReminderTime(timezone, currentTime);
-    }
 
     // Ideas don't get reminders unless explicitly asked
     const finalReminderAt = status === 'IDEA' ? undefined : reminderAt;

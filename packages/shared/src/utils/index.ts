@@ -17,54 +17,13 @@ import {
 } from '../constants/index.js';
 
 /**
- * Get smart default reminder time based on current time of day
- * - Morning (6am-12pm): remind at 12pm (noon) same day
- * - Afternoon (12pm-5pm): remind at 6pm same day
- * - Evening (5pm-9pm): remind at 9pm same day
- * - Night (9pm-6am): remind at 8am next morning
- */
-export function getSmartDefaultReminderTime(
-  timezone: string = DEFAULT_TIMEZONE,
-  referenceDate?: Date
-): Date {
-  const ref = referenceDate || new Date();
-  const zonedRef = toZonedTime(ref, timezone);
-  const currentHour = zonedRef.getHours();
-
-  let targetDate = new Date(zonedRef);
-  let targetHour: number;
-  let addDay = false;
-
-  if (currentHour >= 6 && currentHour < 12) {
-    // Morning: remind at noon
-    targetHour = 12;
-  } else if (currentHour >= 12 && currentHour < 17) {
-    // Afternoon: remind at 6pm
-    targetHour = 18;
-  } else if (currentHour >= 17 && currentHour < 21) {
-    // Evening: remind at 9pm
-    targetHour = 21;
-  } else {
-    // Night (9pm-6am): remind at 8am next morning
-    targetHour = 8;
-    addDay = currentHour >= 21; // After 9pm, add a day; before 6am, 8am is later today
-  }
-
-  targetDate = setHours(setMinutes(targetDate, 0), targetHour);
-  if (addDay) {
-    targetDate = addDays(targetDate, 1);
-  }
-
-  // Safety check: if still in the past, add a day
-  if (isAfter(zonedRef, targetDate)) {
-    targetDate = addDays(targetDate, 1);
-  }
-
-  return fromZonedTime(targetDate, timezone);
-}
-
-/**
  * Parse natural language date/time using chrono-node
+ *
+ * Rules:
+ * - If user specifies exact time (e.g., "7:45pm"), use EXACTLY that time
+ * - If no date specified, assume TODAY
+ * - If "tomorrow" specified, use tomorrow
+ * - Only move to next day if the specified time has already passed today
  */
 export function parseDateTime(
   text: string,
@@ -74,8 +33,9 @@ export function parseDateTime(
   const ref = referenceDate || new Date();
   const zonedRef = toZonedTime(ref, timezone);
   const currentHour = zonedRef.getHours();
+  const lower = text.toLowerCase();
 
-  // Use chrono to parse
+  // Use chrono to parse - forwardDate: true means prefer future dates
   const results = chrono.parse(text, zonedRef, { forwardDate: true });
 
   if (results.length === 0) {
@@ -85,33 +45,55 @@ export function parseDateTime(
   const parsed = results[0];
   let date = parsed.date();
 
-  // If no time was specified, use default reminder time
-  if (!parsed.start.isCertain('hour')) {
-    date = setHours(setMinutes(date, DEFAULT_REMINDER_MINUTE), DEFAULT_REMINDER_HOUR);
-  } else if (!parsed.start.isCertain('meridiem')) {
-    // Time was specified but AM/PM wasn't clear (e.g., "9:30" without AM/PM)
-    const parsedHour = parsed.start.get('hour') || 0;
+  // Check if user explicitly mentioned "tomorrow"
+  const hasTomorrow = lower.includes('tomorrow');
+  // Check if user explicitly mentioned "today"
+  const hasToday = lower.includes('today');
 
-    // Smart AM/PM inference based on current time and context
-    // If it's currently evening (after 5 PM) and parsed hour is less than 12
-    // and the time would be in the past if interpreted as AM today,
-    // assume they mean PM
-    if (currentHour >= 17 && parsedHour < 12) {
-      // User likely means PM since it's evening
-      const pmHour = parsedHour === 12 ? 12 : parsedHour + 12;
-      date = setHours(date, pmHour);
-    } else if (currentHour >= 12 && parsedHour <= currentHour - 12 && parsedHour < 12) {
-      // It's afternoon and the hour would be in the past as AM, assume PM
-      const pmHour = parsedHour + 12;
-      date = setHours(date, pmHour);
+  // If user specified an exact time (hour is certain), respect it exactly
+  if (parsed.start.isCertain('hour')) {
+    // User gave exact time like "7:45pm" - use it as-is
+    // chrono should have parsed it correctly
+
+    // Handle AM/PM ambiguity only if meridiem is not certain
+    if (!parsed.start.isCertain('meridiem')) {
+      const parsedHour = parsed.start.get('hour') || 0;
+      // If hour is 1-11 and no AM/PM specified, infer based on context
+      if (parsedHour >= 1 && parsedHour <= 11) {
+        // If it's currently afternoon/evening and the hour would be in the past as AM, assume PM
+        if (currentHour >= 12 && parsedHour < currentHour - 12) {
+          date = setHours(date, parsedHour + 12);
+        } else if (currentHour >= 17 && parsedHour < 12) {
+          // Evening: assume PM for reasonable hours
+          date = setHours(date, parsedHour + 12);
+        }
+      }
     }
+  } else {
+    // No specific time given - this shouldn't happen if user said "at 7:45pm"
+    // but if it does, don't set a default time, return null to indicate no time parsed
+    return null;
   }
 
-  // If the resulting time is in the past, move to next day
+  // Handle date logic:
+  // - If "tomorrow" is explicitly mentioned, chrono handles it
+  // - If "today" is explicitly mentioned, keep it today even if time passed
+  // - If neither, and time is in past, move to tomorrow
   const zonedDate = toZonedTime(date, timezone);
-  if (isAfter(zonedRef, zonedDate)) {
-    date = addDays(date, 1);
+
+  if (!hasTomorrow && !hasToday) {
+    // No explicit day mentioned - if time is in the past, move to tomorrow
+    if (isAfter(zonedRef, zonedDate)) {
+      date = addDays(date, 1);
+    }
+  } else if (hasToday) {
+    // User explicitly said "today" - keep it today even if past
+    // (they might want to note it was supposed to be today)
+    // Actually, if time is past, still move to that time today (for record)
+    // But realistically, if it's past, we should still set it for today
+    // The reminder just won't fire if already past
   }
+  // If "tomorrow" was mentioned, chrono already set it to tomorrow
 
   // Convert back to UTC
   return fromZonedTime(date, timezone);
@@ -119,34 +101,22 @@ export function parseDateTime(
 
 /**
  * Apply default time rules based on specification
+ *
+ * IMPORTANT: This function should NEVER override a user-specified time.
+ * It only applies defaults when NO time was specified.
  */
 export function applyDefaultTimeRules(
   parsedDate: Date | null,
   text: string,
   timezone: string = DEFAULT_TIMEZONE
 ): Date | null {
-  const now = new Date();
-  const zonedNow = toZonedTime(now, timezone);
-  const currentHour = zonedNow.getHours();
-
-  // If "tomorrow" mentioned and no time, default to 10 AM
-  if (text.toLowerCase().includes('tomorrow') && parsedDate) {
-    const zonedParsed = toZonedTime(parsedDate, timezone);
-    if (zonedParsed.getHours() === 12 && zonedParsed.getMinutes() === 0) {
-      // chrono defaults to noon, override to 10 AM
-      const adjusted = setHours(setMinutes(zonedParsed, DEFAULT_REMINDER_MINUTE), DEFAULT_REMINDER_HOUR);
-      return fromZonedTime(adjusted, timezone);
-    }
+  // If no date was parsed, nothing to adjust
+  if (!parsedDate) {
+    return null;
   }
 
-  // If "today" mentioned and it's past 6 PM, move to next day 10 AM
-  if (text.toLowerCase().includes('today') && currentHour >= 18 && parsedDate) {
-    const zonedParsed = toZonedTime(parsedDate, timezone);
-    const nextDay = addDays(zonedParsed, 1);
-    const adjusted = setHours(setMinutes(nextDay, DEFAULT_REMINDER_MINUTE), DEFAULT_REMINDER_HOUR);
-    return fromZonedTime(adjusted, timezone);
-  }
-
+  // User specified a time - return it as-is, don't override
+  // The parseDateTime function already handles all the logic
   return parsedDate;
 }
 
