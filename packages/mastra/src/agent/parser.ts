@@ -6,6 +6,7 @@ import {
   applyDefaultTimeRules,
   extractTaskTitle,
   detectIntentRuleBased,
+  getSmartDefaultReminderTime,
   DEFAULT_TIMEZONE,
   DEFAULT_REMINDER_HOUR,
   DEFAULT_REMINDER_MINUTE,
@@ -33,8 +34,8 @@ Output a JSON object with:
     "title": "extracted task title without time expressions",
     "notes": "any additional details (optional)",
     "status": "IDEA" or "TODO",
-    "dueAt": "ISO datetime if mentioned",
-    "reminderAt": "ISO datetime for reminder"
+    "dueAt": "ISO datetime if explicitly mentioned",
+    "reminderAt": "ISO datetime ONLY if a specific time is mentioned"
   },
   "taskId": "if referring to existing task",
   "snoozeMinutes": number if snoozing,
@@ -45,7 +46,8 @@ Output a JSON object with:
 Rules:
 - "idea:" prefix or brainstorming language -> status: "IDEA", no reminder
 - "todo:" prefix -> status: "TODO"
-- "remind me" or "reminder" -> status: "TODO" with reminderAt
+- "remind me" or "reminder" -> status: "TODO"
+- IMPORTANT: Only set reminderAt if the user explicitly mentions a time (e.g., "at 3pm", "tomorrow", "in 2 hours"). Do NOT generate a default time.
 - "done" or "done:" -> intent: "mark_done"
 - "snooze" -> intent: "snooze"
 - "list" or "tasks" -> intent: "list_tasks"
@@ -171,7 +173,13 @@ function parseWithRules(
     reminderAt = applyDefaultTimeRules(reminderAt, text, timezone);
 
     // Determine status
-    const status = detectedStatus || (reminderAt ? 'TODO' : 'TODO');
+    const status = detectedStatus || 'TODO';
+
+    // For "remind me" messages without a specific time, use smart defaults
+    const isReminderRequest = lower.includes('remind me') || lower.includes('reminder');
+    if (!reminderAt && isReminderRequest && status === 'TODO') {
+      reminderAt = getSmartDefaultReminderTime(timezone, currentTime);
+    }
 
     // Ideas don't get reminders unless explicitly asked
     const finalReminderAt = status === 'IDEA' ? undefined : reminderAt;

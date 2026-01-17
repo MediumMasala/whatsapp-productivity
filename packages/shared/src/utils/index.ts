@@ -17,6 +17,53 @@ import {
 } from '../constants/index.js';
 
 /**
+ * Get smart default reminder time based on current time of day
+ * - Morning (6am-12pm): remind at 12pm (noon) same day
+ * - Afternoon (12pm-5pm): remind at 6pm same day
+ * - Evening (5pm-9pm): remind at 9pm same day
+ * - Night (9pm-6am): remind at 8am next morning
+ */
+export function getSmartDefaultReminderTime(
+  timezone: string = DEFAULT_TIMEZONE,
+  referenceDate?: Date
+): Date {
+  const ref = referenceDate || new Date();
+  const zonedRef = toZonedTime(ref, timezone);
+  const currentHour = zonedRef.getHours();
+
+  let targetDate = new Date(zonedRef);
+  let targetHour: number;
+  let addDay = false;
+
+  if (currentHour >= 6 && currentHour < 12) {
+    // Morning: remind at noon
+    targetHour = 12;
+  } else if (currentHour >= 12 && currentHour < 17) {
+    // Afternoon: remind at 6pm
+    targetHour = 18;
+  } else if (currentHour >= 17 && currentHour < 21) {
+    // Evening: remind at 9pm
+    targetHour = 21;
+  } else {
+    // Night (9pm-6am): remind at 8am next morning
+    targetHour = 8;
+    addDay = currentHour >= 21; // After 9pm, add a day; before 6am, 8am is later today
+  }
+
+  targetDate = setHours(setMinutes(targetDate, 0), targetHour);
+  if (addDay) {
+    targetDate = addDays(targetDate, 1);
+  }
+
+  // Safety check: if still in the past, add a day
+  if (isAfter(zonedRef, targetDate)) {
+    targetDate = addDays(targetDate, 1);
+  }
+
+  return fromZonedTime(targetDate, timezone);
+}
+
+/**
  * Parse natural language date/time using chrono-node
  */
 export function parseDateTime(
