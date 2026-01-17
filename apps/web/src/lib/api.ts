@@ -32,35 +32,28 @@ export async function api<T>(endpoint: string, options: ApiOptions = {}): Promis
   return data;
 }
 
-// Auth API
+// Auth API - WhatsApp-based login
 export const authApi = {
-  requestOtp: (email: string) =>
+  requestOtp: (whatsappNumber: string) =>
     api<{ success: boolean; message: string; devOtp?: string }>('/auth/request-otp', {
       method: 'POST',
-      body: { email },
+      body: { whatsappNumber },
     }),
 
-  verifyOtp: (email: string, otp: string) =>
+  verifyOtp: (whatsappNumber: string, otp: string) =>
     api<{
       success: boolean;
       token: string;
       user: {
         id: string;
-        email: string;
+        email: string | null;
         whatsappNumber: string;
         timezone: string;
-        needsWhatsAppLink: boolean;
+        name: string | null;
       };
     }>('/auth/verify-otp', {
       method: 'POST',
-      body: { email, otp },
-    }),
-
-  linkWhatsApp: (token: string, whatsappNumber: string) =>
-    api<{ success: boolean; token: string }>('/auth/link-whatsapp', {
-      method: 'POST',
-      body: { whatsappNumber },
-      token,
+      body: { whatsappNumber, otp },
     }),
 
   getMe: (token: string) =>
@@ -68,14 +61,14 @@ export const authApi = {
       success: boolean;
       user: {
         id: string;
-        email: string;
+        email: string | null;
         whatsappNumber: string;
         timezone: string;
+        name: string | null;
         quietHoursStart: string | null;
         quietHoursEnd: string | null;
         snoozeMinutesDefault: number;
         reminderLeadTime: number;
-        needsWhatsAppLink: boolean;
       };
     }>('/me', { token }),
 };

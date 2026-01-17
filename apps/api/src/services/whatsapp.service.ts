@@ -101,6 +101,20 @@ export async function sendTextMessage(
   return { success: false, error: result.error };
 }
 
+// Send OTP for web login
+export async function sendOtpMessage(
+  to: string,
+  otp: string
+): Promise<SendMessageResult> {
+  const message = `🔐 Your login code is: *${otp}*
+
+This code expires in 10 minutes.
+
+If you didn't request this, please ignore this message.`;
+
+  return sendTextMessage(to, message);
+}
+
 export async function sendInteractiveButtons(
   to: string,
   bodyText: string,

@@ -153,16 +153,17 @@ export const WhatsAppInboundMessageSchema = z.object({
     .optional(),
 });
 
-// Auth schemas
+// Auth schemas - WhatsApp-based OTP login
 export const RequestOtpSchema = z.object({
-  email: z.string().email(),
+  whatsappNumber: z.string().min(10).max(15), // Will be normalized to E.164
 });
 
 export const VerifyOtpSchema = z.object({
-  email: z.string().email(),
+  whatsappNumber: z.string().min(10).max(15),
   otp: z.string().length(6),
 });
 
+// Deprecated - kept for backward compatibility
 export const LinkWhatsAppSchema = z.object({
   whatsappNumber: E164PhoneSchema,
 });

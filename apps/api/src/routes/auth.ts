@@ -3,15 +3,17 @@ import {
   RequestOtpSchema,
   VerifyOtpSchema,
   LinkWhatsAppSchema,
+  normalizePhoneNumber,
 } from '@whatsapp-productivity/shared';
 import * as userService from '../services/user.service.js';
+import * as whatsappService from '../services/whatsapp.service.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { createChildLogger } from '../lib/logger.js';
 
 const logger = createChildLogger('auth-routes');
 
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
-  // Request OTP
+  // Request OTP via WhatsApp
   fastify.post('/auth/request-otp', async (request, reply) => {
     const result = RequestOtpSchema.safeParse(request.body);
 
@@ -23,27 +25,43 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       });
     }
 
-    const { email } = result.data;
+    const { whatsappNumber } = result.data;
+    const normalized = normalizePhoneNumber(whatsappNumber);
 
     try {
-      const { otp, user } = await userService.generateAndStoreOtp(email);
+      const { otp, user } = await userService.generateAndStoreOtp(whatsappNumber);
 
-      // In development, log the OTP
-      if (process.env.NODE_ENV === 'development') {
-        logger.info({ email, otp }, 'Generated OTP (dev mode)');
+      // Send OTP via WhatsApp
+      const sendResult = await whatsappService.sendOtpMessage(normalized, otp);
+
+      if (!sendResult.success) {
+        logger.error({ error: sendResult.error, whatsappNumber: normalized }, 'Failed to send OTP via WhatsApp');
+
+        // In development, still return success with OTP for testing
+        if (process.env.NODE_ENV === 'development') {
+          return reply.send({
+            success: true,
+            message: 'OTP generated (WhatsApp send failed in dev mode)',
+            devOtp: otp,
+          });
+        }
+
+        return reply.code(500).send({
+          success: false,
+          error: 'Failed to send OTP via WhatsApp',
+        });
       }
 
-      // In production, you would send the OTP via email
-      // await sendOtpEmail(email, otp);
+      logger.info({ whatsappNumber: normalized }, 'OTP sent via WhatsApp');
 
       return reply.send({
         success: true,
-        message: 'OTP sent to your email',
+        message: 'OTP sent to your WhatsApp',
         // Only include this in development
         ...(process.env.NODE_ENV === 'development' && { devOtp: otp }),
       });
     } catch (error) {
-      logger.error({ error, email }, 'Failed to generate OTP');
+      logger.error({ error, whatsappNumber: normalized }, 'Failed to generate OTP');
       return reply.code(500).send({
         success: false,
         error: 'Failed to send OTP',
@@ -63,10 +81,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       });
     }
 
-    const { email, otp } = result.data;
+    const { whatsappNumber, otp } = result.data;
 
     try {
-      const { valid, user } = await userService.verifyOtp(email, otp);
+      const { valid, user } = await userService.verifyOtp(whatsappNumber, otp);
 
       if (!valid || !user) {
         return reply.code(401).send({
@@ -90,11 +108,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           email: user.email,
           whatsappNumber: user.whatsappNumber,
           timezone: user.timezone,
-          needsWhatsAppLink: user.whatsappNumber.startsWith('temp_'),
+          name: user.name,
         },
       });
     } catch (error) {
-      logger.error({ error, email }, 'Failed to verify OTP');
+      logger.error({ error, whatsappNumber }, 'Failed to verify OTP');
       return reply.code(500).send({
         success: false,
         error: 'Verification failed',

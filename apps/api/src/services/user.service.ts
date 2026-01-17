@@ -96,12 +96,14 @@ export async function markUserOnboarded(id: string): Promise<User> {
   });
 }
 
-export async function generateAndStoreOtp(email: string): Promise<{ otp: string; user: User }> {
+// Generate and store OTP for WhatsApp number
+export async function generateAndStoreOtp(whatsappNumber: string): Promise<{ otp: string; user: User }> {
   const otp = generateOtp(6);
   const expiresAt = new Date(Date.now() + OTP_EXPIRY_SECONDS * 1000);
+  const normalized = normalizePhoneNumber(whatsappNumber);
 
-  // Find or create user by email
-  let user = await findUserByEmail(email);
+  // Find or create user by WhatsApp number
+  let user = await findUserByWhatsApp(normalized);
 
   if (user) {
     user = await prisma.user.update({
@@ -112,26 +114,27 @@ export async function generateAndStoreOtp(email: string): Promise<{ otp: string;
       },
     });
   } else {
-    // Create a temporary user - they'll need to link WhatsApp later
+    // Create new user with WhatsApp number
     user = await prisma.user.create({
       data: {
-        email,
-        whatsappNumber: `temp_${Date.now()}`, // Temporary, will be updated when linking
+        whatsappNumber: normalized,
         otpCode: otp,
         otpExpiresAt: expiresAt,
       },
     });
   }
 
-  logger.info({ email }, 'Generated OTP for user');
+  logger.info({ whatsappNumber: normalized }, 'Generated OTP for user');
   return { otp, user };
 }
 
+// Verify OTP for WhatsApp number
 export async function verifyOtp(
-  email: string,
+  whatsappNumber: string,
   otp: string
 ): Promise<{ valid: boolean; user?: User }> {
-  const user = await findUserByEmail(email);
+  const normalized = normalizePhoneNumber(whatsappNumber);
+  const user = await findUserByWhatsApp(normalized);
 
   if (!user) {
     return { valid: false };
